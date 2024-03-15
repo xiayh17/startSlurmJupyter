@@ -11,6 +11,14 @@
 # Example: source activate myenv
 # Any additional setup needed
 eval "$(conda shell.bash hook)"
+
+if ! conda list -n Jupyter | grep -q 'jupyter'; then
+    echo "Error: Essential packages for Jupyter Notebook are missing in your conda environment."
+    echo "To create a basic environment with Jupyter Notebook and essential packages, run:"
+    echo "conda create -n Jupyter_basic python=3 jupyter"
+    exit 1
+fi
+
 conda activate Jupyter
 
 # Automatically find an available port
@@ -47,6 +55,7 @@ max_attempts=20
 attempt=0
 while [ $attempt -lt $max_attempts ]; do
     if [ -f "$jupyter_log" ]; then
+        echo "Jupyter Notebook log file found: $jupyter_log"
         if grep -q "Jupyter Server.*is running at:" "$jupyter_log"; then
             echo $remote_port > "${HOME}/jupyter_port.txt"
             echo "jupyter_port.txt saved in path: ${HOME}/jupyter_port.txt"
@@ -54,7 +63,7 @@ while [ $attempt -lt $max_attempts ]; do
             break
         fi
     else
-        echo "Jupyter Notebook log file not found: $jupyter_log"
+        echo "Jupyter Notebook log file not found: $jupyter_log. $attempt/$max_attempts" 
     fi
     attempt=$((attempt + 1))
     sleep 5
