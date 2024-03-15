@@ -243,12 +243,76 @@ read -s -n 1
 
 # Cancel the Slurm job
 ssh -p "${login_node_port}" "${user}@${login_node}" "scancel ${job_id}"
-echo "Slurm job ${job_id} has been canceled. Waiting for tunnel closure"
+echo "Slurm job ${job_id} has been canceled. Waiting for tunnel closure..."
 
-# Kill the SSH tunnel
-tunnel_pid=$(lsof -t -i:"${local_port}")
-kill "${tunnel_pid}"
-echo "SSH tunnel on port ${local_port} has been closed. Waiting for cleanup..."
+# Wait a bit to ensure Slurm job has time to cancel and possibly release the tunnel
+sleep 5
+
+# Set the target port number
+echo "Debug: Target port set to ${local_port}"
+
+# Function to fetch PIDs of processes listening on the target port
+get_tunnel_pids() {
+    lsof -t -i:${local_port}
+}
+
+# Function to close SSH tunnels gracefully
+close_tunnels_gracefully() {
+    local pids="$1"
+    while IFS= read -r pid; do
+        echo "Attempting to close SSH tunnel with PID ${pid} on port ${local_port}..."
+        kill "${pid}" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "Debug: Successfully sent SIGTERM to PID ${pid}."
+        else
+            echo "Debug: Failed to send SIGTERM to PID ${pid}."
+        fi
+    done <<< "${pids}"
+}
+
+# Function to force close SSH tunnels
+force_close_tunnels() {
+    local pids="$1"
+    while IFS= read -r pid; do
+        echo "Forcefully closing SSH tunnel with PID ${pid} on port ${local_port}..."
+        kill -9 "${pid}" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo "Debug: Successfully sent SIGKILL to PID ${pid}."
+        else
+            echo "Debug: Failed to send SIGKILL to PID ${pid}."
+        fi
+    done <<< "${pids}"
+}
+
+# Fetch the PIDs of processes listening on the target port
+tunnel_pids=$(get_tunnel_pids)
+echo "Debug: Initial tunnel_pids value: '${tunnel_pids}'"
+
+# Check if any PIDs were found
+if [ -z "${tunnel_pids}" ]; then
+    echo "No SSH tunnel on port ${local_port} found. It appears to be already closed."
+else
+    # Attempt to close SSH tunnels gracefully
+    close_tunnels_gracefully "${tunnel_pids}"
+    
+    # Wait a bit for the processes to terminate
+    sleep 3
+    
+    # Re-fetch the PIDs to check if any processes are still running
+    tunnel_pids=$(get_tunnel_pids)
+    echo "Debug: Re-checked tunnel_pids value: '${tunnel_pids}'"
+    
+    if [ -n "${tunnel_pids}" ]; then
+        echo "Some SSH tunnels on port ${local_port} did not close properly. Attempting to force close..."
+        
+        # Force close remaining SSH tunnels
+        force_close_tunnels "${tunnel_pids}"
+        
+        echo "SSH tunnels on port ${local_port} have been forcefully closed."
+    else
+        echo "All SSH tunnels on port ${local_port} have been closed."
+    fi
+fi
 
 # Clean up temporary files
 rm ./jupyter_job_id.txt ./local_jupyter_port.txt ./remote_jupyter_port.txt
